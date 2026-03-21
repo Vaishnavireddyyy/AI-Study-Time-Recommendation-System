@@ -1,50 +1,52 @@
 import streamlit as st
-from tensorflow.keras.models import load_model
-import joblib
 import numpy as np
 import pandas as pd
 
-# Load model
-model = load_model("study_model.h5", compile=False)
-scaler = joblib.load("scaler.pkl")
-
 st.set_page_config(page_title="AI Study Timetable Generator", layout="wide")
 
-st.title("🤖 AI Study Timetable Generator")
+st.title("📚 AI Study Timetable Generator")
 st.write("Enter your subject details to generate a personalized study timetable.")
 
 # ------------------------------
-# SESSION STATE
-# ------------------------------
-if "generate" not in st.session_state:
-    st.session_state.generate = False
-
-# ------------------------------
-# FUNCTION
+# CONVERT MINUTES FUNCTION
 # ------------------------------
 def convert_time(minutes):
     hours = minutes // 60
     mins = minutes % 60
-    return f"{hours} hrs {mins} mins" if hours > 0 else f"{mins} mins"
+    if hours > 0:
+        return f"{hours} hrs {mins} mins"
+    else:
+        return f"{mins} mins"
 
 # ------------------------------
-# SUBJECT INPUT
+# NUMBER OF SUBJECTS
 # ------------------------------
-num_subjects = st.number_input("How many subjects?", 1, 10, 3)
+num_subjects = st.number_input(
+    "How many courses/subjects do you have?",
+    min_value=1,
+    max_value=10,
+    value=3
+)
 
 subjects = []
 scores = []
 
-st.subheader("📘 Enter Subject Details")
+st.subheader("Enter Subject Details")
 
 for i in range(num_subjects):
+
     col1, col2 = st.columns(2)
 
     with col1:
-        subject = st.text_input(f"Subject {i+1}")
+        subject = st.text_input(f"Subject {i+1} Name")
 
     with col2:
-        score = st.number_input(f"Marks {i+1}", 0, 100, 60)
+        score = st.number_input(
+            f"Marks for Subject {i+1}",
+            min_value=0,
+            max_value=100,
+            value=60
+        )
 
     subjects.append(subject.strip())
     scores.append(score)
@@ -52,63 +54,94 @@ for i in range(num_subjects):
 # ------------------------------
 # EXAM INFO
 # ------------------------------
-st.subheader("📅 Exam Info")
+st.subheader("Exam Preparation Information")
 
-days_left = st.number_input("Days left", 1, 60, 7)
-hours_per_day = st.number_input("Hours per day", 1, 12, 6)
+days_left = st.number_input(
+    "Days left for exam",
+    min_value=1,
+    max_value=60,
+    value=7
+)
+
+hours_per_day = st.number_input(
+    "Available study hours per day",
+    min_value=1,
+    max_value=12,
+    value=6
+)
 
 # ------------------------------
-# BUTTON
+# GENERATE TIMETABLE
 # ------------------------------
-if st.button("Generate AI Timetable"):
-    st.session_state.generate = True
-
-# ------------------------------
-# PROCESS
-# ------------------------------
-if st.session_state.generate:
+if st.button("Generate AI Study Timetable"):
 
     difficulty = []
 
+    # 🔥 SIMPLE AI LOGIC (REPLACES ANN)
     for score in scores:
-        input_data = np.array([[score, 80, 7, 5, 5, 3]])
-        input_scaled = scaler.transform(input_data)
-        pred = model.predict(input_scaled, verbose=0)[0][0]
-        difficulty.append(abs(pred))
+        diff = (100 - score) / 100   # higher if marks low
+        difficulty.append(diff)
 
-    # Hardest subject
-    max_index = difficulty.index(max(difficulty))
+    # ------------------------------
+    # HARDEST SUBJECT
+    # ------------------------------
+    max_diff = max(difficulty)
+    max_index = difficulty.index(max_diff)
     hardest_subject = subjects[max_index]
 
-    st.warning(f"⚠️ Focus more on **{hardest_subject}** (highest difficulty)")
+    if max_diff > 0.6:
+        st.warning(f"⚠️ Focus more on **{hardest_subject}** (highest difficulty)")
+    else:
+        st.success("✅ Subjects are balanced. Follow timetable.")
 
-    # Chart
-    df = pd.DataFrame({"Subject": subjects, "Difficulty": difficulty})
+    # ------------------------------
+    # DIFFICULTY CHART
+    # ------------------------------
+    st.subheader("📊 Subject Difficulty Levels")
+
+    df = pd.DataFrame({
+        "Subject": subjects,
+        "Difficulty": difficulty
+    })
+
     df = df[df["Subject"] != ""]
     st.bar_chart(df.set_index("Subject"))
 
-    # Time allocation
-    total_diff = sum(difficulty)
-    study_minutes = [(d / total_diff) * hours_per_day * 60 for d in difficulty]
+    # ------------------------------
+    # TIME ALLOCATION
+    # ------------------------------
+    total_difficulty = sum(difficulty)
 
-    # Combine + sort
-    data = []
+    study_minutes = []
+
+    for diff in difficulty:
+        hrs = (diff / total_difficulty) * hours_per_day
+        mins = int(hrs * 60)
+        study_minutes.append(mins)
+
+    # ------------------------------
+    # SORT + DISPLAY
+    # ------------------------------
+    st.subheader("📅 Recommended Study Timetable")
+
+    subject_data = []
+
     for i in range(num_subjects):
         if subjects[i] != "":
-            data.append((subjects[i], difficulty[i], study_minutes[i]))
+            subject_data.append((subjects[i], difficulty[i], study_minutes[i]))
 
-    data.sort(key=lambda x: x[1], reverse=True)
+    subject_data.sort(key=lambda x: x[1], reverse=True)
 
-    # Output
-    st.subheader("📅 AI Study Timetable")
+    for i, (sub, diff, mins) in enumerate(subject_data):
 
-    for i, (sub, diff, mins) in enumerate(data):
-        time = convert_time(int(mins))
+        formatted_time = convert_time(mins)
 
         if i == 0:
-            st.error(f"🔥 {sub} → {time} (Highest Priority)")
+            st.error(f"🔥 {sub} → {formatted_time} per day (Highest Priority)")
         else:
-            st.write(f"📖 {sub} → {time}")
+            st.write(f"📖 {sub} → {formatted_time} per day")
 
     st.divider()
-    st.write(f"Total Time Available: {days_left * hours_per_day} hours")
+
+    total_hours = days_left * hours_per_day
+    st.write(f"📊 Total preparation time: **{total_hours} hours**")
