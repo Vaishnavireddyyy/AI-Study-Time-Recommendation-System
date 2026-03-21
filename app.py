@@ -1,83 +1,114 @@
 import streamlit as st
-import numpy as np
-import joblib
-import matplotlib.pyplot as plt
 from tensorflow.keras.models import load_model
+import joblib
+import numpy as np
+import pandas as pd
 
-# Load models
-dnn_model = load_model("study_model.h5", compile=False)
-lstm_model = load_model("lstm_model.h5", compile=False)
+# Load model
+model = load_model("study_model.h5", compile=False)
 scaler = joblib.load("scaler.pkl")
 
-st.set_page_config(page_title="AI Study System", layout="wide")
+st.set_page_config(page_title="AI Study Timetable Generator", layout="wide")
 
-st.title("📚 AI Study Time Recommendation System")
+st.title("🤖 AI Study Timetable Generator")
+st.write("Enter your subject details to generate a personalized study timetable.")
 
-st.header("🔹 Personal Details")
+# ------------------------------
+# SESSION STATE
+# ------------------------------
+if "generate" not in st.session_state:
+    st.session_state.generate = False
 
-col1, col2 = st.columns(2)
+# ------------------------------
+# FUNCTION
+# ------------------------------
+def convert_time(minutes):
+    hours = minutes // 60
+    mins = minutes % 60
+    return f"{hours} hrs {mins} mins" if hours > 0 else f"{mins} mins"
 
-with col1:
-    marks = st.slider("Exam Score (%)", 0, 100, 60)
-    attendance = st.slider("Attendance (%)", 0, 100, 75)
-    sleep = st.slider("Sleep Hours", 3, 10, 7)
+# ------------------------------
+# SUBJECT INPUT
+# ------------------------------
+num_subjects = st.number_input("How many subjects?", 1, 10, 3)
 
-with col2:
-    distraction = st.slider("Distraction Level", 1, 10, 5)
-    stress = st.slider("Stress Level", 1, 10, 5)
-    sessions = st.slider("Study Sessions", 1, 6, 3)
+subjects = []
+scores = []
 
-st.divider()
+st.subheader("📘 Enter Subject Details")
 
-# -------- LSTM INPUT --------
+for i in range(num_subjects):
+    col1, col2 = st.columns(2)
 
-st.header("📅 Enter Last 7 Days Study Hours")
+    with col1:
+        subject = st.text_input(f"Subject {i+1}")
 
-days = []
-for i in range(7):
-    val = st.slider(f"Day {i+1}", 0, 12, 3)
-    days.append(val)
+    with col2:
+        score = st.number_input(f"Marks {i+1}", 0, 100, 60)
 
-st.divider()
+    subjects.append(subject.strip())
+    scores.append(score)
 
-if st.button("🔍 Generate AI Report"):
+# ------------------------------
+# EXAM INFO
+# ------------------------------
+st.subheader("📅 Exam Info")
 
-    # ----- DNN Prediction -----
-    input_data = np.array([[marks, attendance, sleep, distraction, stress, sessions]])
-    input_scaled = scaler.transform(input_data)
-    study_time = dnn_model.predict(input_scaled)[0][0]
+days_left = st.number_input("Days left", 1, 60, 7)
+hours_per_day = st.number_input("Hours per day", 1, 12, 6)
 
-    # ----- LSTM Prediction -----
-    lstm_input = np.array(days).reshape((1,7,1))
-    consistency = lstm_model.predict(lstm_input)[0][0]
+# ------------------------------
+# BUTTON
+# ------------------------------
+if st.button("Generate AI Timetable"):
+    st.session_state.generate = True
 
-    # Convert to label
-    if consistency < 1.5:
-        habit = "Highly Consistent 👍"
-    elif consistency < 3:
-        habit = "Moderately Consistent 🙂"
-    else:
-        habit = "Irregular Study Pattern ⚠️"
+# ------------------------------
+# PROCESS
+# ------------------------------
+if st.session_state.generate:
 
-    # ----- Extra Metrics -----
-    focus_score = max(0, 100 - distraction*5 - stress*3)
-    burnout = "High" if stress > 7 else "Moderate" if stress > 4 else "Low"
+    difficulty = []
 
-    st.success(f"📖 Recommended Study Time: {round(study_time,2)} hrs/day")
+    for score in scores:
+        input_data = np.array([[score, 80, 7, 5, 5, 3]])
+        input_scaled = scaler.transform(input_data)
+        pred = model.predict(input_scaled, verbose=0)[0][0]
+        difficulty.append(abs(pred))
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("🎯 Focus Score", f"{focus_score}%")
-    col2.metric("⚠️ Burnout Risk", burnout)
-    col3.metric("📊 Study Habit", habit)
+    # Hardest subject
+    max_index = difficulty.index(max(difficulty))
+    hardest_subject = subjects[max_index]
+
+    st.warning(f"⚠️ Focus more on **{hardest_subject}** (highest difficulty)")
+
+    # Chart
+    df = pd.DataFrame({"Subject": subjects, "Difficulty": difficulty})
+    df = df[df["Subject"] != ""]
+    st.bar_chart(df.set_index("Subject"))
+
+    # Time allocation
+    total_diff = sum(difficulty)
+    study_minutes = [(d / total_diff) * hours_per_day * 60 for d in difficulty]
+
+    # Combine + sort
+    data = []
+    for i in range(num_subjects):
+        if subjects[i] != "":
+            data.append((subjects[i], difficulty[i], study_minutes[i]))
+
+    data.sort(key=lambda x: x[1], reverse=True)
+
+    # Output
+    st.subheader("📅 AI Study Timetable")
+
+    for i, (sub, diff, mins) in enumerate(data):
+        time = convert_time(int(mins))
+
+        if i == 0:
+            st.error(f"🔥 {sub} → {time} (Highest Priority)")
+        else:
+            st.write(f"📖 {sub} → {time}")
 
     st.divider()
-
-    # ----- Weekly Chart -----
-    st.subheader("📊 Weekly Study Pattern")
-
-    fig, ax = plt.subplots()
-    ax.plot(days, marker="o")
-    ax.set_ylabel("Hours")
-    ax.set_title("Your Study Trend")
-
-    st.pyplot(fig)
+    st.write(f"Total Time Available: {days_left * hours_per_day} hours")
