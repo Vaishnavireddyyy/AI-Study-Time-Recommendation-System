@@ -145,3 +145,4 @@ if st.button("Generate AI Study Timetable"):
 
     total_hours = days_left * hours_per_day
     st.write(f"📊 Total preparation time: **{total_hours} hours**")
+st.write("✅ New Version Running")
